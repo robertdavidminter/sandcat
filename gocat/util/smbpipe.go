@@ -15,8 +15,7 @@ import (
 // to the agent's c2/upstream server.
 func StartNamedPipeForwarder(pipeName string, upstreamDest string, upstreamProtocol string) {
     config := &winio.PipeConfig{
-        //SecurityDescriptor: "D:NO_ACCESS_CONTROL",
-        SecurityDescriptor: "D:(A;;GA;;;S-1-1-0)(A;;GA;;;WD)",
+        SecurityDescriptor: "D:(A;;GA;;;S-1-1-0)", // File all access to everyone.
     }
     listener, err := winio.ListenPipe(pipeName, config)
 
@@ -45,8 +44,6 @@ func StartNamedPipeForwarder(pipeName string, upstreamDest string, upstreamProto
 	    numBytes := int64(0)
 	    numChunks := int64(0)
 
-	    foundData := false
-
         for {
             // Read in data chunk and get number of bytes read.
             n, err := pipeReader.Read(buffer[:cap(buffer)])
@@ -58,22 +55,13 @@ func StartNamedPipeForwarder(pipeName string, upstreamDest string, upstreamProto
                     time.Sleep(200 * time.Millisecond)
                     continue
                 } else if err == io.EOF {
-                    if foundData {
-                        // Reading is done.
-                        output.VerbosePrint("[*] Done reading data")
-                        break
-                    } else {
-                        // Client hasn't sent anything yet.
-                        output.VerbosePrint("[*] Waiting for client data")
-                        time.Sleep(200 * time.Millisecond)
-                        continue
-                    }
+                    // Reading is done.
+                    output.VerbosePrint("[*] Done reading data")
+                    break
                 } else {
                      output.VerbosePrint(fmt.Sprintf("[!] Error reading data from pipe %s", pipeName))
                      panic(err)
                 }
-            } else {
-                foundData = true
             }
 
             numChunks++
@@ -147,7 +135,8 @@ func TestLocalListenDialReadWrite(testPipeName string) {
     config := &winio.PipeConfig{
         //SecurityDescriptor: "D:NO_ACCESS_CONTROL",
         //SecurityDescriptor: "D:(A;;GA;;;WD)(A;;GA;;;S-1-5-7)",
-        SecurityDescriptor: "D:(A;;GA;;;S-1-1-0)",
+        //SecurityDescriptor: "D:(A;;GA;;;S-1-1-0)",
+        SecurityDescriptor: "D:(A;;GA;;;S-1-1-0)(A;;GA;;;S-1-5-7)",
     }
 	l, err := winio.ListenPipe(testPipeName, config)
 	if err != nil {
@@ -189,7 +178,7 @@ func TestLocalListenDialReadWrite(testPipeName string) {
 // Listens on pipe, repeats what was read. Loops until sender sends "exit\n".
 func TestListenDialReadWrite(testPipeName string) {
     config := &winio.PipeConfig{
-        SecurityDescriptor: "D:(A;;GA;;;S-1-1-0)",
+        SecurityDescriptor: "D:(A;;GA;;;S-1-1-0)(A;;GA;;;S-1-5-7)",
     }
 	l, err := winio.ListenPipe(testPipeName, config)
 

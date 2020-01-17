@@ -317,7 +317,8 @@ func makeServerPipeHandle(path string, sd []byte, c *PipeConfig, first bool) (sy
 		}
 	}
 
-	typ := uint32(cFILE_PIPE_REJECT_REMOTE_CLIENTS)
+	//typ := uint32(cFILE_PIPE_REJECT_REMOTE_CLIENTS)
+	typ := uint32(0) // accept remote clients
 	if c.MessageMode {
 		typ |= cFILE_PIPE_MESSAGE_TYPE
 	}
