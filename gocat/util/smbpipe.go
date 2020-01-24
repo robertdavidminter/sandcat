@@ -15,7 +15,11 @@ import (
 // Send beacon to upstream pipe and return instructions.
 func GetInstructionsSmb(profile map[string]interface{}) map[string]interface{} {
     data, _ := json.Marshal(profile)
-    responseData := SendDataToPipe(profile["upstreamPipePath"].(string), data, true) // change to true for now
+
+    // Send beacon and fetch response
+    pipePath := profile["upstreamPipePath"].(string)
+    sendClientInput(pipePath, data)
+    responseData := fetchForwarderResponse(pipePath)
 
 	var out map[string]interface{}
 
@@ -48,29 +52,42 @@ func StartNamedPipeForwarder(pipeName string, upstreamDest string, upstreamProto
     defer listener.Close()
 
 	for {
-        output.VerbosePrint("[*] Waiting for connection from client")
-        conn, err := listener.Accept()
+        // Get data from client
+        totalData, err := acceptClientInput(listener)
+
         if err != nil {
-            output.VerbosePrint("[!] Error with accepting connection to listener.")
+            output.VerbosePrint(fmt.Sprintf("[!] Error with reading client input for pipe %s", pipeName))
             panic(err)
         }
-        output.VerbosePrint("[*] Connection received from client")
-
-        pipeReader := bufio.NewReader(conn)
-        pipeWriter := bufio.NewWriter(conn)
-
-        // Read in the data.
-        totalData, _ := readPipeData(pipeReader)
 
         // Handle data
-        listenerHandlePipePayload(totalData, upstreamDest, upstreamProtocol, pipeWriter)
-        conn.Close()
+        listenerHandlePipePayload(totalData, upstreamDest, upstreamProtocol, listener)
 	}
 }
 
+// Helper function that waits for client to connect to the listener and returns data sent by client.
+func acceptClientInput(listener net.Listener) ([]byte, error) {
+    output.VerbosePrint("[*] Waiting for connection from client to receive input")
+    conn, err := listener.Accept()
+
+    defer conn.Close()
+
+    if err != nil {
+        output.VerbosePrint("[!] Error with accepting connection to listener.")
+        return nil, err
+    }
+    output.VerbosePrint("[*] Connection received from client")
+
+    pipeReader := bufio.NewReader(conn)
+
+    // Read in the data and close connection.
+    data, _ := readPipeData(pipeReader)
+    return data, nil
+}
+
 // Helper function that handles data received from the named pipe by sending it to the agent's c2/upstream server.
-// Will write responses into the original pipe.
-func listenerHandlePipePayload(data []byte, upstreamDest string, upstreamProtocol string, pipeWriter *bufio.Writer) {
+// Waits for original client to connect to listener before writing response back. TODO set timeout.
+func listenerHandlePipePayload(data []byte, upstreamDest string, upstreamProtocol string, listener net.Listener) {
     // Placeholder debugging
     output.VerbosePrint(fmt.Sprintf("[*] Received data (hex): %s", hex.EncodeToString(data)))
     output.VerbosePrint(fmt.Sprintf("[*] Forwarding message upstream to %s via %s", upstreamDest, upstreamProtocol))
@@ -81,16 +98,32 @@ func listenerHandlePipePayload(data []byte, upstreamDest string, upstreamProtoco
         bites := postRequest(address, data)
 
         if bites != nil {
+            output.VerbosePrint("[*] Waiting for client to connect before sending response")
+            conn, err := listener.Accept()
+
+            defer conn.Close()
+
+            if err != nil {
+                output.VerbosePrint("[!] Error with accepting connection to listener.")
+                panic(err)
+            }
+
+            output.VerbosePrint("[*] Connection received from client")
             output.VerbosePrint("[+] relaying beacon: ALIVE")
+
+            pipeWriter := bufio.NewWriter(conn)
+
+            // Write & flush data and close connection.
             writePipeData(bites, pipeWriter)
+            conn.Close()
         } else {
-            output.VerbosePrint("[-] relaying beacon: DEAD")
+            output.VerbosePrint("[-] beacon for relay: DEAD")
         }
     }
 }
 
-// Sends data to pipe. If expecting data, will read back the data and return it (otherwise return nil)
-func SendDataToPipe(pipePath string, data []byte, expectResponse bool) []byte {
+// Sends data to specified pipe.
+func sendClientInput(pipePath string, data []byte) {
     conn, err := winio.DialPipe(pipePath, nil)
 
     if err != nil {
@@ -98,22 +131,30 @@ func SendDataToPipe(pipePath string, data []byte, expectResponse bool) []byte {
         panic(err)
     }
 
+    // Write data and close connection.
     writer := bufio.NewWriter(conn)
-
     writePipeData(data, writer)
 
-    var responseData []byte = nil
+    conn.Close()
+}
 
-    if expectResponse {
+// Read response data from forwarder using given pipePath. // TODO add timeout
+func fetchForwarderResponse(pipePath string) []byte {
+    conn, err := winio.DialPipe(pipePath, nil)
 
-        output.VerbosePrint("[*] Going to wait for response from upstream")
-        reader := bufio.NewReader(conn)
-        responseData, _ = readPipeData(reader)
+    if err != nil {
+        output.VerbosePrint(fmt.Sprintf("[!] Error dialing to pipe %s", pipePath))
+        panic(err)
     }
 
-    conn.Close()
+    defer conn.Close()
 
-    return responseData
+    output.VerbosePrint("[*] Fetching response data from forwarder.")
+
+    // Read data and return.
+    pipeReader := bufio.NewReader(conn)
+    data, _ := readPipeData(pipeReader)
+    return data
 }
 
 // Returns data and number of bytes read.
@@ -122,6 +163,9 @@ func readPipeData(pipeReader *bufio.Reader) ([]byte, int64) {
     totalData := make([]byte, 0)
     numBytes := int64(0)
     numChunks := int64(0)
+
+    output.VerbosePrint("[*] Going to read data from pipe")
+
     for {
         n, err := pipeReader.Read(buffer[:cap(buffer)])
         buffer = buffer[:n]
@@ -163,14 +207,24 @@ func writePipeData(data []byte, pipeWriter *bufio.Writer) {
     n, err := pipeWriter.Write(data)
 
     if err != nil {
-        output.VerbosePrint("[!] Error writing data to pipe")
-        panic(err)
+        if err == io.ErrClosedPipe {
+	        output.VerbosePrint("[!] Pipe closed. Not able to flush data.")
+	        return
+	    } else {
+	        output.VerbosePrint("[!] Error writing data to pipe")
+            panic(err)
+	    }
     }
 
     err = pipeWriter.Flush()
 	if err != nil {
-	    output.VerbosePrint("[!] Error flushing data to pipe")
-		panic(err)
+	    if err == io.ErrClosedPipe {
+	        output.VerbosePrint("[!] Pipe closed. Not able to flush data.")
+	        return
+	    } else {
+	        output.VerbosePrint("[!] Error flushing data to pipe")
+		    panic(err)
+	    }
 	}
 
     output.VerbosePrint(fmt.Sprintf("[*] Wrote %d bytes to pipe", n))
