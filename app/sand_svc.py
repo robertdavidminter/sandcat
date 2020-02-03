@@ -1,4 +1,3 @@
-import hashlib
 import os
 import random
 import string
@@ -10,13 +9,13 @@ from app.utility.base_service import BaseService
 
 class SandService(BaseService):
 
-    def __init__(self, services, popular_process_names):
+    def __init__(self, services):
         self.file_svc = services.get('file_svc')
         self.data_svc = services.get('data_svc')
         self.contact_svc = services.get('contact_svc')
+        self.app_svc = services.get('app_svc')
         self.log = self.create_logger('sand_svc')
         self.sandcat_dir = os.path.relpath(os.path.join('plugins', 'sandcat'))
-        self.popular_process_names = popular_process_names
 
     async def dynamically_compile_executable(self, headers):
         name, platform = headers.get('file'), headers.get('platform')
@@ -25,11 +24,7 @@ class SandService(BaseService):
                                           headers=headers,
                                           compile_target_name=name,
                                           output_name=name)
-        _, path = await self.file_svc.find_file_path('sandcat.go-%s' % platform)
-        signature = hashlib.md5(open(path, 'rb').read()).hexdigest()
-        display_name = random.choice(self.popular_process_names.get(platform))
-        self.log.debug('sandcat downloaded with hash=%s and name=%s' % (signature, display_name))
-        return '%s-%s' % (name, platform), display_name
+        return await self.app_svc.retrieve_compiled_file(name, platform)
 
     async def dynamically_compile_library(self, headers):
         name, platform = headers.get('file'), headers.get('platform')
@@ -55,7 +50,7 @@ class SandService(BaseService):
                                               output_name=name,
                                               buildmode='--buildmode=c-shared',
                                               **compile_options[platform],
-                                              flag_params=('defaultServer', 'defaultGroup', 'defaultSleep', 'c2')),
+                                              flag_params=('server', 'c2')),
         return '%s-%s' % (name, platform), self.generate_name()
 
     async def install_gocat_extensions(self):
@@ -77,8 +72,7 @@ class SandService(BaseService):
         return '', ''
 
     async def _compile_new_agent(self, platform, headers, compile_target_name, output_name, buildmode='',
-                                 extldflags='', cflags='',
-                                 flag_params=('defaultServer', 'defaultGroup', 'defaultSleep', 'c2')):
+                                 extldflags='', cflags='', flag_params=('server', 'c2')):
         plugin, file_path = await self.file_svc.find_file_path(compile_target_name)
         ldflags = ['-s', '-w', '-X main.key=%s' % (self._generate_key(),)]
         for param in flag_params:
@@ -90,8 +84,7 @@ class SandService(BaseService):
         output = 'plugins/%s/payloads/%s-%s' % (plugin, output_name, platform)
         ldflags.append(extldflags)
         self.file_svc.log.debug('Dynamically compiling %s' % compile_target_name)
-        await self.file_svc.compile_go(platform, output, file_path, buildmode=buildmode,
-                                       ldflags=' '.join(ldflags), cflags=cflags)
+        await self.file_svc.compile_go(platform, output, file_path, buildmode=buildmode, ldflags=' '.join(ldflags), cflags=cflags)
 
     def _copy_file_to_sandcat(self, file, pkg):
         try:

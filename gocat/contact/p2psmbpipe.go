@@ -260,8 +260,8 @@ func (p2pPipeClient SmbPipeAPI) Ping(profile map[string]interface{}) bool {
         output.VerbosePrint(fmt.Sprintf("[*] Obtained individual pipe name %s", newPipeName))
 
         // Replace server for agent.
-        serverHostname := strings.Split(profile["server"].(string), "\\")[2]
-        newServerPipePath := "\\\\" + serverHostName + "\\" + newPipeName
+        serverHostname := strings.Split(profile["server"].(string), "\\")[3]
+        newServerPipePath := "\\\\" + serverHostName + "\\pipe\\" + newPipeName
         output.VerbosePrint(fmt.Sprintf("[*] Setting new server %s", newServerPipePath))
 
         profile["server"] = newServerPipePath
