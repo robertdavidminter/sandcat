@@ -13,7 +13,7 @@ type Contact interface {
 	RunInstruction(command map[string]interface{}, profile map[string]interface{}, payloads []string)
 	C2RequirementsMet(profile map[string]interface{}, criteria interface{}) bool
 	Drop(profile map[string]interface{}, payload string) string
-	SendExecutionResults(profile map[string]interface{}, commandID interface{}, server interface{}, result []byte, status string, cmd string, pid string)
+	SendExecutionResults(profile map[string]interface{}, commandID interface{}, result []byte, status string, cmd string, pid string)
 }
 
 //CommunicationChannels contains the contact implementations

@@ -15,7 +15,7 @@ import (
 )
 
 const pipeLetters = "abcdefghijklmnopqrstuvwxyz"
-const numPipeLetters := int64(len(pipeLetters))
+const numPipeLetters = int64(len(pipeLetters))
 
 //PipeAPI communicates through SMB named pipes. Implements the Contact interface
 type SmbPipeAPI struct { }
@@ -24,43 +24,46 @@ type SmbPipeAPI struct { }
 type SmbPipeForwarder struct { }
 
 func init() {
-	CommunicationChannels["P2pSmbPipe"] = PipeAPI{}
+	CommunicationChannels["P2pSmbPipe"] = SmbPipeAPI{}
 }
 
 // SmbPipeForwarder Implementation
 
 // Listen on agent's main pipe for client connection, and then send them the name of an individual pipe to listen on.
 func (forwarder SmbPipeForwarder) ListenForClient(profile map[string]interface{}) {
-    pipeName := profile["localPipePath"].(string)
+    pipePath := profile["localPipePath"].(string)
 
-    listener, err := listenPipeFullAccess(pipeName)
+    listener, err := forwarder.listenPipeFullAccess(pipePath)
 
     if err != nil {
-        output.VerbosePrint(fmt.Sprintf("[!] Error with creating listener for pipe %s", pipeName))
+        output.VerbosePrint(fmt.Sprintf("[!] Error with creating listener for pipe %s", pipePath))
         panic(err)
     }
+
+    output.VerbosePrint(fmt.Sprintf("[*] Listening on handler pipe %s", pipePath))
 
     defer listener.Close()
 
     // Whenever a new client connects to pipe with a ping request, generate a new individual pipe for that client, listen on that pipe,
     // and give the pipe name to the client if pipe was successfully created.
     for {
+        output.VerbosePrint(fmt.Sprintf("[*] Handler Pipe %s: Waiting for connection from client to receive input", pipePath))
         totalData, err := acceptPipeClientInput(listener)
 
         if err != nil {
-            output.VerbosePrint(fmt.Sprintf("[!] Error with reading client input for pipe %s", pipeName))
+            output.VerbosePrint(fmt.Sprintf("[!] Error with reading client input for pipe %s", pipePath))
             panic(err)
         }
 
         // convert data to message struct
         var message P2pMessage
-        json.Unmarshal(data, &message)
+        json.Unmarshal(totalData, &message)
 
         // Handle request. We only accept pings.
         switch message.InstructionType {
         case INSTR_PING:
-            output.VerbosePrint(fmt.Sprintf("[*] Received PING from paw ID %d on behalf of %d", message.CurrentAgentPaw, message.ForwardedForPaw))
-            handleSmbPipePing(profile, listener)
+            output.VerbosePrint("[*] Received PING!")
+            forwarder.handleSmbPipePing(profile, listener)
         default:
             output.VerbosePrint(fmt.Sprintf("[!] ERROR: expected ping, received %d", message.InstructionType))
         }
@@ -69,8 +72,8 @@ func (forwarder SmbPipeForwarder) ListenForClient(profile map[string]interface{}
 
 func (forwarder SmbPipeForwarder) handleSmbPipePing(profile map[string]interface{}, listener net.Listener) {
     // Client pipe names will be 10-15 characters long
-    clientPipeNameMinLen = 10
-    clientPipeNameMaxLen = 15
+    clientPipeNameMinLen := 10
+    clientPipeNameMaxLen := 15
 
     output.VerbosePrint("[*] Waiting for client to connect before sending ping response")
     conn, err := listener.Accept()
@@ -86,36 +89,40 @@ func (forwarder SmbPipeForwarder) handleSmbPipePing(profile map[string]interface
 
     // Create random pipe name
     rand.Seed(time.Now().UnixNano())
-    clientPipeName = getRandPipeName(rand.Intn(clientPipeNameMaxLen - clientPipeNameMinLen) + clientPipeNameMinLen)
+    clientPipeName := getRandPipeName(rand.Intn(clientPipeNameMaxLen - clientPipeNameMinLen) + clientPipeNameMinLen)
+    clientPipePath := "\\\\.\\pipe\\" + clientPipeName
     output.VerbosePrint(fmt.Sprintf("[*] Making individual client pipe %s", clientPipeName))
 
     // Start forwarder on client pipe and send name to client.
-    go forwarder.StartForwarder(profile, clientPipeName)
+    go forwarder.StartForwarder(profile, clientPipePath)
 
     pipeWriter := bufio.NewWriter(conn)
 
     // Write & flush data and close connection.
-    writePipeData([]bytes(clientPipeName), pipeWriter)
+    writePipeData([]byte(clientPipeName), pipeWriter)
     conn.Close()
 }
 
 // Sets up listener on pipe for individual client
-func (forwarder SmbPipeForwarder) StartForwarder(profile map[string]interface{}, pipeName string) {
-    listener, err := listenPipeFullAccess(pipeName)
+func (forwarder SmbPipeForwarder) StartForwarder(profile map[string]interface{}, pipePath string) {
+    listener, err := forwarder.listenPipeFullAccess(pipePath)
 
     if err != nil {
-        output.VerbosePrint(fmt.Sprintf("[!] Error with creating listener for pipe %s", pipeName))
+        output.VerbosePrint(fmt.Sprintf("[!] Error with creating listener for pipe %s", pipePath))
         panic(err)
     }
+
+    output.VerbosePrint(fmt.Sprintf("[*] Listening on individual client pipe %s", pipePath))
 
     defer listener.Close()
 
 	for {
         // Get data from client
+        output.VerbosePrint(fmt.Sprintf("[*] Individual Pipe %s: Waiting for connection from client to receive input", pipePath))
         totalData, err := acceptPipeClientInput(listener)
 
         if err != nil {
-            output.VerbosePrint(fmt.Sprintf("[!] Error with reading client input for pipe %s", pipeName))
+            output.VerbosePrint(fmt.Sprintf("[!] Error with reading client input for pipe %s", pipePath))
             panic(err)
         }
 
@@ -125,11 +132,11 @@ func (forwarder SmbPipeForwarder) StartForwarder(profile map[string]interface{},
 }
 
 // Helper function that listens on pipe and returns listener and any error.
-func (forwarder SmbPipeForwarder) listenPipeFullAccess(pipeName string) (net.Listener, error) {
+func (forwarder SmbPipeForwarder) listenPipeFullAccess(pipePath string) (net.Listener, error) {
     config := &winio.PipeConfig{
         SecurityDescriptor: "D:(A;;GA;;;S-1-1-0)", // File all access to everyone.
     }
-    return winio.ListenPipe(pipeName, config)
+    return winio.ListenPipe(pipePath, config)
 }
 
 // Helper function that creates random string of specified length using letters a-z
@@ -145,7 +152,6 @@ func getRandPipeName(length int) string {
 
 // Helper function that waits for client to connect to the listener and returns data sent by client.
 func acceptPipeClientInput(listener net.Listener) ([]byte, error) {
-    output.VerbosePrint("[*] Waiting for connection from client to receive input")
     conn, err := listener.Accept()
 
     defer conn.Close()
@@ -237,16 +243,19 @@ func forwardSendExecResults(data []byte, profile map[string]interface{}, listene
 
 
 
-// SmbPipeAPI implementation
+/*
+ * SmbPipeAPI implementation
+ */
+
+// Contact API functions
 
 // Dial to pipe using server and get individual pipe name to connect to for other transactions.
 func (p2pPipeClient SmbPipeAPI) Ping(profile map[string]interface{}) bool {
     // Build SMB Pipe message for ping.
     pipeMsg := make(map[string]interface{})
-    pipeMsg["current_agent"] = int64(profile["paw"])
-    pipeMsg["forwarded_for"] = int64(profile["paw"])
-    pipeMsg["instruction_type"] = INSTR_PING
-    pipeMsg["payload"] = nil
+    pipeMsg["RequestingAgentPaw"] = "" // no PAW for now
+    pipeMsg["InstructionType"] = INSTR_PING
+    pipeMsg["Payload"] = nil
     pipeMsgData, _ := json.Marshal(pipeMsg)
 
     // Send beacon and fetch response
@@ -260,7 +269,7 @@ func (p2pPipeClient SmbPipeAPI) Ping(profile map[string]interface{}) bool {
         output.VerbosePrint(fmt.Sprintf("[*] Obtained individual pipe name %s", newPipeName))
 
         // Replace server for agent.
-        serverHostname := strings.Split(profile["server"].(string), "\\")[3]
+        serverHostName := strings.Split(profile["server"].(string), "\\")[2]
         newServerPipePath := "\\\\" + serverHostName + "\\pipe\\" + newPipeName
         output.VerbosePrint(fmt.Sprintf("[*] Setting new server %s", newServerPipePath))
 
@@ -271,6 +280,41 @@ func (p2pPipeClient SmbPipeAPI) Ping(profile map[string]interface{}) bool {
         return false
     }
 }
+
+func (p2pPipeClient SmbPipeAPI) GetInstructions(profile map[string]interface{}) map[string]interface{} {
+    return nil
+}
+
+func (p2pPipeClient SmbPipeAPI) DropPayloads(profile map[string]interface{}, payload string) []string {
+    return nil
+}
+
+func (p2pPipeClient SmbPipeAPI) RunInstruction(command map[string]interface{}, profile map[string]interface{}, payloads []string) {
+
+}
+
+func (p2pPipeClient SmbPipeAPI) C2RequirementsMet(profile map[string]interface{}, criteria interface{}) bool {
+    // Check if upstream P2P forwarder works by fetching a unique pipe solely for this agent.
+	result := p2pPipeClient.Ping(profile)
+
+    if result {
+        output.VerbosePrint(fmt.Sprintf("[*] Set pipe server path to unique pipe %s", profile["server"]))
+    } else {
+        output.VerbosePrint("[-] Failed to set P2P SMB pipe")
+	}
+
+	return result
+}
+
+func (p2pPipeClient SmbPipeAPI) Drop(profile map[string]interface{}, payload string) string {
+    return ""
+}
+
+func (p2pPipeClient SmbPipeAPI) SendExecutionResults(profile map[string]interface{}, commandID interface{}, result []byte, status string, cmd string, pid string) {
+}
+
+
+// Helper functions
 
 // Sends data to specified pipe.
 func sendSmbPipeClientInput(pipePath string, data []byte) {

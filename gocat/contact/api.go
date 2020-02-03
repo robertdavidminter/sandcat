@@ -65,7 +65,7 @@ func (contact API) DropPayloads(profile map[string]interface{}, payload string) 
 	var droppedPayloads []string
 	for _, payload := range payloads {
 		if len(payload) > 0 {
-			droppedPayloads = append(droppedPayloads, contact.Drop(profile map[string]interface{}, payload))
+			droppedPayloads = append(droppedPayloads, contact.Drop(profile, payload))
 		}
 	}
 	return droppedPayloads
@@ -75,7 +75,7 @@ func (contact API) DropPayloads(profile map[string]interface{}, payload string) 
 func (contact API) RunInstruction(command map[string]interface{}, profile map[string]interface{}, payloads []string) {
     timeout := int(command["timeout"].(float64))
 	cmd, result, status, pid := execute.RunCommand(command["command"].(string), payloads, profile["platform"].(string), command["executor"].(string), timeout)
-	SendExecutionResults(profile, command["id"], result, status, cmd, pid)
+	contact.SendExecutionResults(profile, command["id"], result, status, cmd, pid)
 }
 
 //C2RequirementsMet determines if sandcat can use the selected comm channel

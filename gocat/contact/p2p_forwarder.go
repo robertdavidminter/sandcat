@@ -9,14 +9,13 @@ const (
 
 //P2pForwarder defines required functions for communicating with the server
 type P2pForwarder interface {
-	StartForwarder(profile map[string]interface{}, pipeName string))
+	StartForwarder(profile map[string]interface{}, pipeName string, upstreamComs Contact)
 }
 
 
 // Defines message structure for p2p
 type P2pMessage struct {
-    CurrentAgentPaw int64
-    ForwardedForPaw int64
+    RequestingAgentPaw string
     InstructionType int64
     Payload []byte
 }
