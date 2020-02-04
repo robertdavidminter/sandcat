@@ -98,7 +98,7 @@ func (contact API) GetPayloadBytes(payload string, server string, uniqueID strin
 		if err == nil && resp.StatusCode == ok {
 			buf, err := ioutil.ReadAll(resp.Body)
 
-			if err != nil {
+			if err == nil {
 			    retBuf = buf
 			}
 		}
@@ -109,7 +109,7 @@ func (contact API) GetPayloadBytes(payload string, server string, uniqueID strin
 
 //SendExecutionResults will send the execution results to the server.
 func (contact API) SendExecutionResults(commandID interface{}, server interface{}, result []byte, status string, cmd string, pid string, uniqueID string) {
-	address := fmt.Sprintf("%s/results", server)
+	address := fmt.Sprintf("%s%s", server, apiResult)
 	link := fmt.Sprintf("%s", commandID.(string))
 	data, _ := json.Marshal(map[string]string{"id": link, "output": string(util.Encode(result)), "status": status, "pid": pid})
 	request(address, data)

@@ -88,7 +88,6 @@ func (receiver SmbPipeReceiver) startIndividualReceiver(profile map[string]inter
 
 	for {
         // Get data from client
-        output.VerbosePrint(fmt.Sprintf("[*] Individual Pipe %s: Waiting for connection from client to receive input", pipePath))
         totalData, err := acceptPipeClientInput(listener)
 
         if err != nil {
