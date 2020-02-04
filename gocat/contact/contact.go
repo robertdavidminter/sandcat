@@ -12,8 +12,8 @@ type Contact interface {
 	DropPayloads(profile map[string]interface{}, payload string) []string
 	RunInstruction(command map[string]interface{}, profile map[string]interface{}, payloads []string)
 	C2RequirementsMet(profile map[string]interface{}, criteria interface{}) bool
-	Drop(profile map[string]interface{}, payload string) string
-	SendExecutionResults(profile map[string]interface{}, commandID interface{}, result []byte, status string, cmd string, pid string)
+	GetPayloadBytes(payload string, server string, uniqueID string, platform string) []byte
+	SendExecutionResults(commandID interface{}, server interface{}, result []byte, status string, cmd string, pid string, uniqueID string)
 }
 
 //CommunicationChannels contains the contact implementations

