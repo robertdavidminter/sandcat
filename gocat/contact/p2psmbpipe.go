@@ -6,7 +6,6 @@ import (
     "io"
     "net"
     "encoding/json"
-    //"encoding/hex" // for debugging
     "time"
     "math/rand"
     "strings"
@@ -40,7 +39,7 @@ func (receiver SmbPipeReceiver) StartReceiver(profile map[string]interface{}, p2
     listener, err := receiver.listenPipeFullAccess(pipePath)
 
     if err != nil {
-        output.VerbosePrint(fmt.Sprintf("[!] Error with creating listener for pipe %s", pipePath))
+        output.VerbosePrint(fmt.Sprintf("[!] Error with creating listener for pipe %s\n%v", pipePath, err))
         return
     }
 
@@ -48,23 +47,22 @@ func (receiver SmbPipeReceiver) StartReceiver(profile map[string]interface{}, p2
 
     defer listener.Close()
 
-    // Whenever a new client connects to pipe with a ping request, generate a new individual pipe for that client, listen on that pipe,
+    // Whenever a new client connects to pipe with an individual pipe request, generate a new individual pipe for that client, listen on that pipe,
     // and give the pipe name to the client if pipe was successfully created.
     for {
         totalData, err := acceptPipeClientInput(listener)
 
         if err != nil {
-            output.VerbosePrint(fmt.Sprintf("[!] Error with reading client input for pipe %s", pipePath))
+            output.VerbosePrint(fmt.Sprintf("[!] Error with reading client input for pipe %s\n%v", pipePath, err))
             return
         }
 
         // convert data to message struct
         message := bytesToP2pMsg(totalData)
 
-        // Handle request. We only accept pings.
+        // Handle request. We only accept requests for individual pipes.
         switch message.InstructionType {
         case INSTR_GET_INDIVID_PIPE:
-            output.VerbosePrint("[*] Received request for individual pipe for client")
             receiver.handleIndividualPipeRequest(profile, listener, upstreamComs)
         default:
             output.VerbosePrint(fmt.Sprintf("[!] ERROR: expected individual pipe request, received request type %d", message.InstructionType))
@@ -77,7 +75,7 @@ func (receiver SmbPipeReceiver) startIndividualReceiver(profile map[string]inter
     listener, err := receiver.listenPipeFullAccess(pipePath)
 
     if err != nil {
-        output.VerbosePrint(fmt.Sprintf("[!] Error with creating listener for pipe %s", pipePath))
+        output.VerbosePrint(fmt.Sprintf("[!] Error with creating listener for pipe %s\n%v", pipePath, err))
         return
     }
 
@@ -90,7 +88,7 @@ func (receiver SmbPipeReceiver) startIndividualReceiver(profile map[string]inter
         totalData, err := acceptPipeClientInput(listener)
 
         if err != nil {
-            output.VerbosePrint(fmt.Sprintf("[!] Error with reading client input for pipe %s", pipePath))
+            output.VerbosePrint(fmt.Sprintf("[!] Error with reading client input for pipe %s\n%v", pipePath, err))
             return
         }
 
@@ -199,7 +197,7 @@ func acceptPipeClientInput(listener net.Listener) ([]byte, error) {
     defer conn.Close()
 
     if err != nil {
-        output.VerbosePrint("[!] Error with accepting connection to listener.")
+        output.VerbosePrint(fmt.Sprintf("[!] Error with accepting connection to listener.\n%v", err))
         return nil, err
     }
 
@@ -214,9 +212,6 @@ func acceptPipeClientInput(listener net.Listener) ([]byte, error) {
 // Waits for original client to connect to listener before writing response back. TODO set timeout.
 // Does not handle individual pipe request - those are handled in ListenForClient.
 func listenerHandlePipePayload(data []byte, profile map[string]interface{}, listener net.Listener, upstreamComs Contact) {
-    // Placeholder debugging
-    //output.VerbosePrint(fmt.Sprintf("[*] Received data from client (hex): %s", hex.EncodeToString(data)))
-
     // convert data to message struct
     var message P2pMessage
     json.Unmarshal(data, &message)
@@ -242,7 +237,7 @@ func sendResponseToClient(data []byte, listener net.Listener) {
     defer conn.Close()
 
     if err != nil {
-        output.VerbosePrint("[!] Error with accepting connection to listener.")
+        output.VerbosePrint(fmt.Sprintf("[!] Error with accepting connection to listener.\n%v", err))
         return
     }
 
@@ -360,7 +355,7 @@ func (p2pPipeClient SmbPipeAPI) SendExecutionResults(commandID interface{}, serv
 // Will change profile's server to the new pipe name. Returns pipe path on success, empty string on failure.
 // Returns true on success.
 func (p2pPipeClient SmbPipeAPI) getIndividualPipe(profile map[string]interface{}) string {
-    // Build SMB Pipe message for ping.
+    // Build SMB Pipe message for requesting individual pipe.
     paw := ""
     if profile["paw"] != nil {
         paw = profile["paw"].(string)
@@ -368,7 +363,9 @@ func (p2pPipeClient SmbPipeAPI) getIndividualPipe(profile map[string]interface{}
 
     pipeMsgData := buildP2pMsgBytes(paw, INSTR_GET_INDIVID_PIPE, nil)
 
-    // Send ping and fetch response
+    output.VerbosePrint("[*] P2P Client: Going to get individual pipe.")
+
+    // Send request and fetch response
     pipePath := profile["server"].(string)
     sendSmbPipeClientInput(pipePath, pipeMsgData)
     responseData := fetchReceiverResponse(pipePath)
@@ -409,7 +406,12 @@ func sendSmbPipeClientInput(pipePath string, data []byte) {
     conn, err := winio.DialPipe(pipePath, nil)
 
     if err != nil {
-        output.VerbosePrint(fmt.Sprintf("[!] Error dialing to pipe %s", pipePath))
+        output.VerbosePrint(fmt.Sprintf("Error: %v", err))
+        if err == winio.ErrTimeout {
+            output.VerbosePrint(fmt.Sprintf("[!] Timed out trying to dial to pipe %s", pipePath))
+        } else {
+            output.VerbosePrint(fmt.Sprintf("[!] Error dialing to pipe %s\n", pipePath, err))
+        }
         return
     }
 
@@ -425,7 +427,11 @@ func fetchReceiverResponse(pipePath string) []byte {
     conn, err := winio.DialPipe(pipePath, nil)
 
     if err != nil {
-        output.VerbosePrint(fmt.Sprintf("[!] Error dialing to pipe %s", pipePath))
+        if err == winio.ErrTimeout {
+            output.VerbosePrint(fmt.Sprintf("[!] Timed out trying to dial to pipe %s", pipePath))
+        } else {
+            output.VerbosePrint(fmt.Sprintf("[!] Error dialing to pipe %s\n", pipePath, err))
+        }
         return nil
     }
 
@@ -492,7 +498,7 @@ func writePipeData(data []byte, pipeWriter *bufio.Writer) {
 	        output.VerbosePrint("[!] Pipe closed. Not able to flush data.")
 	        return
 	    } else {
-	        output.VerbosePrint("[!] Error writing data to pipe")
+	        output.VerbosePrint(fmt.Sprintf("[!] Error writing data to pipe\n%v", err))
             return
 	    }
     }
@@ -503,7 +509,7 @@ func writePipeData(data []byte, pipeWriter *bufio.Writer) {
 	        output.VerbosePrint("[!] Pipe closed. Not able to flush data.")
 	        return
 	    } else {
-	        output.VerbosePrint("[!] Error flushing data to pipe")
+	        output.VerbosePrint(fmt.Sprintf("[!] Error flushing data to pipe\n%v", err))
 		    return
 	    }
 	}
