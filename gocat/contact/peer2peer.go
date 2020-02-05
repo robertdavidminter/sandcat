@@ -5,13 +5,13 @@ import (
 )
 
 const (
-	INSTR_PING = 0
+	INSTR_GET_INDIVID_PIPE = 0
 	INSTR_GET_INSTRUCTIONS = 1
 	INSTR_GET_PAYLOAD_BYTES = 2
 	INSTR_SEND_EXECUTION_RESULTS = 3
 )
 
-//P2pReceiver defines required functions for communicating with the server
+//P2pReceiver defines required functions for relaying messages between peers and an upstream peer/c2.
 type P2pReceiver interface {
 	StartReceiver(profile map[string]interface{}, p2pReceiverConfig map[string]string, upstreamComs Contact)
 }

