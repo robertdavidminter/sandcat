@@ -67,7 +67,6 @@ func buildProfile(server string, executors []string, privilege string, c2 string
 	profile["executors"] = execute.DetermineExecutor(executors, runtime.GOOS, runtime.GOARCH)
 	profile["privilege"] = privilege
 	profile["exe_name"] = filepath.Base(os.Args[0])
-
 	return profile
 }
 
@@ -77,7 +76,6 @@ func chooseCommunicationChannel(profile map[string]interface{}, c2Config map[str
 		output.VerbosePrint("[-] Invalid C2 Configuration! Defaulting to HTTP")
 		coms, _ = contact.CommunicationChannels["HTTP"]
 	}
-
 	return coms
 }
 
