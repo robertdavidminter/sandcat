@@ -4,11 +4,15 @@ import (
     "encoding/json"
 )
 
+// Define MessageType for P2pMessage
 const (
-	INSTR_GET_INDIVID_PIPE = 0
-	INSTR_GET_INSTRUCTIONS = 1
-	INSTR_GET_PAYLOAD_BYTES = 2
-	INSTR_SEND_EXECUTION_RESULTS = 3
+	INSTR_GET_INSTRUCTIONS = 0
+	INSTR_GET_PAYLOAD_BYTES = 1
+	INSTR_SEND_EXECUTION_RESULTS = 2
+	RESEND_REQUEST = 3 // For server to ask the client to resent the request to a new specified destination.
+	RESPONSE_INSTRUCTIONS = 4 // For server to send instructions to client
+	RESPONSE_PAYLOAD_BYTES = 5
+	RESPONSE_SEND_EXECUTION_RESULTS = 6
 )
 
 //P2pReceiver defines required functions for relaying messages between peers and an upstream peer/c2.
@@ -20,7 +24,7 @@ type P2pReceiver interface {
 // Defines message structure for p2p
 type P2pMessage struct {
     RequestingAgentPaw string
-    InstructionType int64
+    MessageType int
     Payload []byte
 }
 
@@ -30,7 +34,7 @@ type P2pMessage struct {
 func buildP2pMsgBytes(paw string, instruction int, payload []byte) []byte {
     p2pMsg := make(map[string]interface{})
     p2pMsg["RequestingAgentPaw"] = paw
-    p2pMsg["InstructionType"] = instruction
+    p2pMsg["MessageType"] = instruction
     p2pMsg["Payload"] = payload
     p2pMsgData, _ := json.Marshal(p2pMsg)
 

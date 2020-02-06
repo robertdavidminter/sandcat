@@ -82,7 +82,7 @@ func chooseCommunicationChannel(profile map[string]interface{}, c2Config map[str
 func validC2Configuration(profile map[string]interface{}, coms contact.Contact, c2Config map[string]string) bool {
 	if strings.EqualFold(c2Config["c2Name"], c2Config["c2Name"]) {
 		if _, valid := contact.CommunicationChannels[c2Config["c2Name"]]; valid {
-			return coms.C2RequirementsMet(profile, c2Config)
+			return coms.C2RequirementsMet(c2Config)
 		}
 	}
 	return false
@@ -92,7 +92,7 @@ func chooseP2pReceiverChannel(p2pReceiverConfig map[string]string) contact.P2pRe
     receiver, _ := contact.P2pReceiverChannels[p2pReceiverConfig["p2pReceiverType"]]
 
     if receiver != nil && !validP2pReceiverConfiguration(receiver, p2pReceiverConfig) {
-        output.VerbosePrint("[-] Invalid P2P Receiver configuration. Defaulting to no P2P")
+        output.VerbosePrint("[-] Invalid P2P Receiver configuration. Defaulting to no P2P receiver")
         receiver = nil
     }
 
@@ -135,7 +135,9 @@ func Core(server string, delay int, executors []string, c2 map[string]string, p2
 
 		    if p2pReceiver != nil {
 		        output.VerbosePrint(fmt.Sprintf("Starting p2p receiver type %s at %s", p2pReceiverType, p2pReceiverLoc))
-		        go p2pReceiver.StartReceiver(profile, p2pReceiverConfig, coms)
+
+		        // This method calls a go subroutine before returning.
+		        p2pReceiver.StartReceiver(profile, p2pReceiverConfig, coms)
 		    }
 
 		    // Run agent
