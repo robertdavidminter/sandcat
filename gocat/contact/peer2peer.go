@@ -26,6 +26,7 @@ type P2pMessage struct {
     RequestingAgentPaw string
     MessageType int
     Payload []byte
+    Populated bool
 }
 
 // Helper Functions
@@ -36,6 +37,7 @@ func buildP2pMsgBytes(paw string, instruction int, payload []byte) []byte {
     p2pMsg["RequestingAgentPaw"] = paw
     p2pMsg["MessageType"] = instruction
     p2pMsg["Payload"] = payload
+    p2pMsg["Populated"] = true
     p2pMsgData, _ := json.Marshal(p2pMsg)
 
     return p2pMsgData
@@ -47,6 +49,11 @@ func bytesToP2pMsg(data []byte) P2pMessage {
     json.Unmarshal(data, &message)
 
     return message
+}
+
+// Check if message is empty.
+func msgIsEmpty(msg P2pMessage) bool {
+    return !msg.Populated
 }
 
 // P2pReceiverChannels contains the P2pReceiver implementations
