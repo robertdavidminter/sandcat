@@ -402,7 +402,7 @@ func (p2pPipeClient SmbPipeAPI) RunInstruction(command map[string]interface{}, p
 	p2pPipeClient.SendExecutionResults(command["id"], profile["server"], result, status, cmd, pid, profile["paw"].(string))
 }
 
-func (p2pPipeClient SmbPipeAPI) C2RequirementsMet(criteria interface{}) bool {
+func (p2pPipeClient SmbPipeAPI) C2RequirementsMet(criteria map[string]string) bool {
     return true
 }
 

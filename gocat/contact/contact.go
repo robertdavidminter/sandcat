@@ -10,7 +10,7 @@ type Contact interface {
 	GetInstructions(profile map[string]interface{}) map[string]interface{}
 	DropPayloads(payload string, server string, uniqueId string, platform string) []string
 	RunInstruction(command map[string]interface{}, profile map[string]interface{}, payloads []string)
-	C2RequirementsMet(criteria interface{}) bool
+	C2RequirementsMet(criteria map[string]string) bool
 	GetPayloadBytes(payload string, server string, uniqueID string, platform string) []byte
 	SendExecutionResults(commandID interface{}, server interface{}, result []byte, status string, cmd string, pid string, uniqueID string)
 }
